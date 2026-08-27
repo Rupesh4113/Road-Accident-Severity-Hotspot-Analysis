@@ -55,7 +55,7 @@ def generate_interactive_map(coords, hotspots, output_filename, dataset_name="UK
     
     # Create base map
     m = folium.Map(location=[mean_lat, mean_lng], zoom_start=6 if dataset_name == "UK" else 4, 
-                   tiles="CartoDB positron")
+                   tiles="OpenStreetMap")
     
     # Prepare data for HeatMap (list of [lat, lng, weight])
     heat_data = coords[["latitude", "longitude"]].dropna().values.tolist()
