@@ -1,0 +1,13 @@
+pandas
+numpy
+scikit-learn
+imbalanced-learn
+catboost
+scipy
+matplotlib
+seaborn
+folium
+requests
+streamlit
+streamlit-folium
+python-docx
