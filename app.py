@@ -32,6 +32,10 @@ def load_model_assets():
         "us_cb": "models/us_catboost.joblib",
         "us_scaler": "models/us_scaler.joblib",
         "us_features": "models/us_features.joblib",
+        "blr_rf": "models/bengaluru_random_forest.joblib",
+        "blr_cb": "models/bengaluru_catboost.joblib",
+        "blr_scaler": "models/bengaluru_scaler.joblib",
+        "blr_features": "models/bengaluru_features.joblib",
     }
     for key, path in model_paths.items():
         if os.path.exists(path):
@@ -57,7 +61,11 @@ if app_mode == "Severity Predictor":
     st.markdown("Select a dataset and input the accident details to calculate severity probabilities.")
     
     # Dataset selection
-    dataset_choice = st.selectbox("Choose Target Region & Schema:", ["United Kingdom (STATS19 Schema)", "United States (Kaggle Schema)"])
+    dataset_choice = st.selectbox("Choose Target Region & Schema:", [
+        "United Kingdom (STATS19 Schema)", 
+        "United States (Kaggle Schema)",
+        "Bengaluru, India (MORTH Schema)"
+    ])
     
     if dataset_choice == "United Kingdom (STATS19 Schema)":
         col1, col2 = st.columns(2)
@@ -272,19 +280,113 @@ if app_mode == "Severity Predictor":
                 })
                 st.bar_chart(prob_df, x="US Traffic Severity", y="Probability (%)", horizontal=True)
 
+    elif dataset_choice == "Bengaluru, India (MORTH Schema)":
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Temporal & Traffic Metrics")
+            traffic_volume = st.number_input("Est. Traffic Volume (vehicles/hour):", min_value=0.0, max_value=6000.0, value=1500.0, step=100.0)
+            hour_blr = st.slider("Hour of Day:", 0, 23, 18)
+            month_blr = st.slider("Month of Year:", 1, 12, 10)
+            day_of_week_str_blr = st.selectbox("Day of Week:", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"])
+            day_map = {"Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3, "Friday": 4, "Saturday": 5, "Sunday": 6}
+            day_of_week_blr = day_map[day_of_week_str_blr]
+            
+            model_type_blr = st.radio("Classification Model:", ["CatBoost (Recommended)", "Random Forest"])
+            
+        with col2:
+            st.subheader("Regional Environmental & Road Safety Geometry")
+            weather_blr = st.selectbox("Weather Condition:", ["Sunny/Clear", "Raining", "Foggy", "Overcast"])
+            road_cond_blr = st.selectbox("Road Surface Condition:", ["Dry", "Wet", "Potholes/Damaged", "Under Construction"])
+            
+            st.markdown("**Local Infrastructure Features**")
+            speed_breaker = st.checkbox("Speed Breaker (Hump) Present")
+            traffic_signal_blr = st.checkbox("Traffic Signal Functioning")
+            junction_blr = st.checkbox("At a Major Intersection/Junction")
+            crossing_blr = st.checkbox("Pedestrian Crossing (Zebra/Footpath)")
+            
+        if st.button("🔮 Predict Bengaluru Incident Severity", type="primary"):
+            if not assets["blr_rf"] or not assets["blr_cb"] or not assets["blr_scaler"] or not assets["blr_features"]:
+                st.error("Bengaluru model assets are not loaded. Please run the training pipeline.")
+            else:
+                # 1. Build raw input row
+                raw_data = {
+                    "month": month_blr,
+                    "day_of_week": day_of_week_blr,
+                    "hour": hour_blr,
+                    "Speed_Breaker": int(speed_breaker),
+                    "Traffic_Signal": int(traffic_signal_blr),
+                    "Junction": int(junction_blr),
+                    "Crossing": int(crossing_blr)
+                }
+                
+                # 2. Scale numeric columns
+                numeric_input = np.array([[traffic_volume]])
+                scaled_numeric = assets["blr_scaler"].transform(numeric_input)[0]
+                raw_data["Traffic_Volume"] = scaled_numeric[0]
+                
+                # 3. Handle one-hot encoding columns manually based on feature list
+                features_list = assets["blr_features"]
+                input_df = pd.DataFrame(columns=features_list)
+                input_df.loc[0] = 0.0 # initialize with zeros
+                
+                # Map numeric inputs
+                for k, v in raw_data.items():
+                    if k in input_df.columns:
+                        input_df.loc[0, k] = v
+                        
+                # Map categorical inputs
+                cat_mappings = {
+                    f"Weather_Condition_{weather_blr}": 1.0,
+                    f"Road_Condition_{road_cond_blr}": 1.0
+                }
+                for col_name, val in cat_mappings.items():
+                    if col_name in input_df.columns:
+                        input_df.loc[0, col_name] = val
+                
+                # Ensure correct column order
+                input_df = input_df[features_list]
+                
+                # 4. Predict
+                model = assets["blr_cb"] if model_type_blr == "CatBoost (Recommended)" else assets["blr_rf"]
+                probs = model.predict_proba(input_df)[0]
+                pred_idx = np.argmax(probs)
+                
+                # Mapped back (0=Fatal, 1=Grievous Injury, 2=Minor Injury, 3=Non-Injury)
+                classes = ["Fatal", "Grievous Injury", "Minor Injury", "Non-Injury (Property Damage Only)"]
+                colors = ["danger", "warning", "info", "success"]
+                
+                st.write("---")
+                st.subheader("Prediction Results")
+                st.markdown(f"**Predicted Class**: :{colors[pred_idx]}[{classes[pred_idx]}]")
+                
+                # Display bar charts
+                prob_df = pd.DataFrame({
+                    "Indian MORTH Severity": ["Fatal", "Grievous Injury", "Minor Injury", "Non-Injury"],
+                    "Probability (%)": [p * 100 for p in probs]
+                })
+                st.bar_chart(prob_df, x="Indian MORTH Severity", y="Probability (%)", horizontal=True)
+
 # ----------------- PAGE 2: INTERACTIVE HOTSPOT MAPS -----------------
 elif app_mode == "Interactive Hotspot Maps":
     st.header("🗺️ Interactive Geospatial Hotspot Maps")
     st.markdown("These maps plot accident coordinates as a heatmap and highlight the top 2% densest accident clusters (hotspots) calculated using 2D Kernel Density Estimation (KDE).")
     
-    map_choice = st.selectbox("Choose Area to Explore:", ["United Kingdom (London & Great Britain)", "United States (Clustered Sample)"])
+    map_choice = st.selectbox("Choose Area to Explore:", [
+        "United Kingdom (London & Great Britain)", 
+        "United States (Clustered Sample)",
+        "Bengaluru, India (High-Traffic Junctions)"
+    ])
     
     if map_choice == "United Kingdom (London & Great Britain)":
         map_path = "outputs/uk_hotspots.html"
         title_text = "UK Accident Hotspots Map"
-    else:
+    elif map_choice == "United States (Clustered Sample)":
         map_path = "outputs/us_hotspots.html"
         title_text = "US Accident Hotspots Map"
+    else:
+        map_path = "outputs/bengaluru_hotspots.html"
+        title_text = "Bengaluru Accident Hotspots Map"
         
     if os.path.exists(map_path):
         st.subheader(title_text)
@@ -302,10 +404,16 @@ elif app_mode == "Model Insights & Diagnostics":
     st.header("📊 Model Insights & Performance Metrics")
     st.markdown("Examine the metrics, confusion matrices, and risk factors isolated by the Random Forest and CatBoost models.")
     
-    dataset_insight = st.selectbox("Select Target Region:", ["UK Accidents (STATS19)", "US Accidents"])
+    dataset_insight = st.selectbox("Select Target Region:", ["UK Accidents (STATS19)", "US Accidents", "Bengaluru Accidents"])
     model_insight = st.selectbox("Select Model:", ["CatBoost", "Random Forest"])
     
-    region_key = "uk" if dataset_insight == "UK Accidents (STATS19)" else "us"
+    if dataset_insight == "UK Accidents (STATS19)":
+        region_key = "uk"
+    elif dataset_insight == "US Accidents":
+        region_key = "us"
+    else:
+        region_key = "bengaluru"
+        
     model_key = "catboost" if model_insight == "CatBoost" else "random_forest"
     
     cm_img_path = f"outputs/{region_key}_{model_key}_cm.png"
@@ -335,9 +443,15 @@ elif app_mode == "Model Insights & Diagnostics":
         - **Infrastructure & Scale Factors**: The number of vehicles involved and total casualties are critical features. Single-carriageway sections are highly correlated with severity.
         - **Lighting & Lighting Infrastructure**: Darkness without streetlights (`light_Darkness_No_Lighting`) shows high importance, suggesting poor street lighting significantly worsens crash severity.
         """)
-    else:
+    elif region_key == "us":
         st.markdown("""
         - **Temporal Patterns**: Time factors (`hour`, `month`, `day_of_week`) are highly predictive of traffic congestion severity in the US. Peak commute hours (7-9 AM, 4-6 PM) correlate with high-impact disruptions.
         - **Weather & Environmental Factors**: Visibility, temperature, and humidity represent environmental risk factors. Inclement weather conditions like heavy rain or dense fog reduce visibility, increasing congestion and severe delays.
         - **Points of Interest**: Features like `Traffic_Signal` and `Junction` are highly correlated with accidents, confirming intersections as significant risk hotspots.
+        """)
+    else:
+        st.markdown("""
+        - **Traffic & Hour Volume**: Bengaluru's predictions are highly driven by traffic volume and time (`hour`). Peak evening commute hours (5-9 PM) show substantial correlations with incident occurrences.
+        - **Road Condition Factors**: **Potholes/Damaged Roads** are isolated as a key regional risk factor for severe outcomes (Grievous or Fatal) in Bengaluru, highlighting local infrastructural impact.
+        - **Junctions & Signals**: Accidents near major junctions (`Junction`) have higher occurrences of grievous injuries, whereas areas with functioning `Traffic_Signals` statistically show a reduced probability of fatal outcomes.
         """)

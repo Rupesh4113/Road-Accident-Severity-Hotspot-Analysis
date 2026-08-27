@@ -183,7 +183,83 @@ def check_or_generate_us_data():
     print(f"Generated synthetic US Accidents dataset at: {sample_path}")
     return sample_path, True
 
+def check_or_generate_bengaluru_data():
+    """Checks if a Bengaluru accidents CSV exists. If not, generates a sample dataset."""
+    csv_files = [f for f in os.listdir("data") if f.lower().startswith("bengaluru_accidents") and f.endswith(".csv")]
+    real_csv_files = [f for f in csv_files if "sample" not in f]
+    
+    if real_csv_files:
+        blr_path = os.path.join("data", real_csv_files[0])
+        print(f"Found existing Bengaluru Accidents dataset at: {blr_path}")
+        return blr_path, False
+        
+    sample_path = os.path.join("data", "bengaluru_accidents_sample.csv")
+    if os.path.exists(sample_path):
+        print(f"Using existing synthetic Bengaluru Accidents sample at: {sample_path}")
+        return sample_path, True
+        
+    print("Bengaluru Accidents dataset not found in data/. Generating synthetic Bengaluru sample...")
+    np.random.seed(42)
+    n_rows = 10000
+    
+    # Bengaluru high-accident junctions
+    junctions = {
+        "Silk Board": (12.9175, 77.6225),
+        "Hebbal": (13.0358, 77.5975),
+        "Majestic": (12.9766, 77.5726),
+        "Tin Factory": (12.9930, 77.6740),
+        "Indiranagar": (12.9719, 77.6412),
+        "Electronic City": (12.8488, 77.6601)
+    }
+    
+    j_keys = list(junctions.keys())
+    j_probs = [0.25, 0.2, 0.2, 0.15, 0.1, 0.1]
+    
+    coords = []
+    for _ in range(n_rows):
+        junc = j_keys[np.random.choice(len(j_keys), p=j_probs)]
+        center_lat, center_lng = junctions[junc]
+        lat = center_lat + np.random.normal(0, 0.04)
+        lng = center_lng + np.random.normal(0, 0.04)
+        coords.append((lat, lng))
+        
+    # Temporal
+    dates = pd.date_range(start="2024-01-01", end="2024-12-31", periods=n_rows)
+    times = [f"{np.random.randint(0,24):02d}:{np.random.randint(0,60):02d}" for _ in range(n_rows)]
+    
+    # Severity (MORTH schema: 1=Fatal, 2=Grievous, 3=Minor, 4=Non-Injury)
+    severity = np.random.choice([1, 2, 3, 4], n_rows, p=[0.05, 0.25, 0.60, 0.10])
+    
+    df = pd.DataFrame({
+        "ID": [f"BLR-{i+1}" for i in range(n_rows)],
+        "Severity": severity,
+        "Date": dates.strftime("%d/%m/%Y"),
+        "Time": times,
+        "Latitude": [c[0] for c in coords],
+        "Longitude": [c[1] for c in coords],
+        "Traffic_Volume": np.clip(np.random.normal(loc=1500, scale=500, size=n_rows), 100, 3000),
+        "Weather_Condition": np.random.choice(
+            ["Sunny/Clear", "Raining", "Foggy", "Overcast"],
+            n_rows,
+            p=[0.75, 0.15, 0.05, 0.05]
+        ),
+        "Road_Condition": np.random.choice(
+            ["Dry", "Wet", "Potholes/Damaged", "Under Construction"],
+            n_rows,
+            p=[0.60, 0.15, 0.20, 0.05]
+        ),
+        "Speed_Breaker": np.random.choice([1, 0], n_rows, p=[0.10, 0.90]),
+        "Traffic_Signal": np.random.choice([1, 0], n_rows, p=[0.20, 0.80]),
+        "Junction": np.random.choice([1, 0], n_rows, p=[0.25, 0.75]),
+        "Crossing": np.random.choice([1, 0], n_rows, p=[0.12, 0.88])
+    })
+    
+    df.to_csv(sample_path, index=False)
+    print(f"Generated synthetic Bengaluru Accidents dataset at: {sample_path}")
+    return sample_path, True
+
 if __name__ == "__main__":
     setup_directories()
     download_uk_data()
     check_or_generate_us_data()
+    check_or_generate_bengaluru_data()

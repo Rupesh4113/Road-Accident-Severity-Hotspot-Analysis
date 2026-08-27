@@ -4,8 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Import custom modules
-from src.downloader import setup_directories, download_uk_data, check_or_generate_us_data
-from src.data_preprocessing import preprocess_uk_data, preprocess_us_data, split_and_prep_data
+from src.downloader import setup_directories, download_uk_data, check_or_generate_us_data, check_or_generate_bengaluru_data
+from src.data_preprocessing import preprocess_uk_data, preprocess_us_data, preprocess_bengaluru_data, split_and_prep_data
 from src.model_training import (
     balance_classes_smote, train_random_forest, train_catboost,
     evaluate_model, analyze_and_plot_feature_importance, save_trained_model
@@ -96,6 +96,51 @@ def run_us_pipeline(us_file_path, is_sample):
         "map_path": map_path
     }
 
+def run_bengaluru_pipeline(blr_file_path, is_sample):
+    print("\n=========================================")
+    print(f"RUNNING PIPELINE FOR BENGALURU ACCIDENTS DATA {'(SAMPLE)' if is_sample else ''}")
+    print("=========================================")
+    
+    # 1. Preprocessing
+    X, y, coords = preprocess_bengaluru_data(blr_file_path)
+    
+    # 2. Split
+    X_train, X_test, y_train, y_test = split_and_prep_data(X, y)
+    
+    # 3. SMOTE
+    X_train_res, y_train_res = balance_classes_smote(X_train, y_train)
+    
+    # 4. Train Models
+    # Classes: Severity 1 to 4 -> 0 to 3 index representing Indian standards:
+    # 0=Fatal, 1=Grievous Injury, 2=Minor Injury, 3=Non-Injury
+    class_names = ["Fatal", "Grievous Injury", "Minor Injury", "Non-Injury"]
+    
+    # Check present classes
+    present_classes = np.sort(np.unique(y_test))
+    eval_class_names = [class_names[c] for c in present_classes]
+    
+    # Random Forest
+    rf_model = train_random_forest(X_train_res, y_train_res, "Bengaluru")
+    rf_preds, rf_acc, rf_f1 = evaluate_model(rf_model, X_test, y_test, eval_class_names, "Random Forest", "Bengaluru")
+    analyze_and_plot_feature_importance(rf_model, X.columns, "Random Forest", "Bengaluru")
+    save_trained_model(rf_model, "bengaluru_random_forest.joblib")
+    
+    # CatBoost
+    cb_model = train_catboost(X_train_res, y_train_res, "Bengaluru")
+    cb_preds, cb_acc, cb_f1 = evaluate_model(cb_model, X_test, y_test, eval_class_names, "CatBoost", "Bengaluru")
+    analyze_and_plot_feature_importance(cb_model, X.columns, "CatBoost", "Bengaluru")
+    save_trained_model(cb_model, "bengaluru_catboost.joblib")
+    
+    # 5. Spatial Analysis
+    coords_sample, hotspots = perform_kde_and_find_hotspots(coords)
+    map_path = generate_interactive_map(coords_sample, hotspots, "bengaluru_hotspots.html", "Bengaluru")
+    
+    return {
+        "RF": {"accuracy": rf_acc, "f1_macro": rf_f1},
+        "CatBoost": {"accuracy": cb_acc, "f1_macro": cb_f1},
+        "map_path": map_path
+    }
+
 def main():
     print("Initializing Road Accident Severity & Hotspot Analysis Pipeline...")
     
@@ -105,10 +150,12 @@ def main():
     # Check/retrieve data
     uk_path = download_uk_data()
     us_path, is_sample = check_or_generate_us_data()
+    blr_path, is_blr_sample = check_or_generate_bengaluru_data()
     
     # Execute pipelines
     uk_results = run_uk_pipeline(uk_path)
     us_results = run_us_pipeline(us_path, is_sample)
+    blr_results = run_bengaluru_pipeline(blr_path, is_blr_sample)
     
     # Print final summary
     print("\n" + "="*50)
@@ -123,6 +170,11 @@ def main():
     print(f"Random Forest - Accuracy: {us_results['RF']['accuracy']:.4f}, Macro F1: {us_results['RF']['f1_macro']:.4f}")
     print(f"CatBoost      - Accuracy: {us_results['CatBoost']['accuracy']:.4f}, Macro F1: {us_results['CatBoost']['f1_macro']:.4f}")
     print(f"Interactive Map Saved to: {us_results['map_path']}")
+    
+    print("\n[BENGALURU DATASET RESULTS]")
+    print(f"Random Forest - Accuracy: {blr_results['RF']['accuracy']:.4f}, Macro F1: {blr_results['RF']['f1_macro']:.4f}")
+    print(f"CatBoost      - Accuracy: {blr_results['CatBoost']['accuracy']:.4f}, Macro F1: {blr_results['CatBoost']['f1_macro']:.4f}")
+    print(f"Interactive Map Saved to: {blr_results['map_path']}")
     
     print("\nAll evaluation figures (confusion matrices & feature importances) have been saved to the 'outputs/' directory.")
     print("Trained models have been saved to the 'models/' directory.")

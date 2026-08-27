@@ -215,6 +215,74 @@ def preprocess_us_data(file_path):
     print(f"US Preprocessing complete. Cleaned shape: {X.shape}, Classes: {np.bincount(y)}")
     return X, y, coords
 
+def preprocess_bengaluru_data(file_path):
+    """Load and preprocess the Bengaluru Road Accidents dataset."""
+    print("Preprocessing Bengaluru road safety data...")
+    df = pd.read_csv(file_path, low_memory=False)
+    
+    # Drop rows with invalid coordinates
+    df = df.dropna(subset=["Latitude", "Longitude"])
+    df = df[(df["Latitude"] != 0) & (df["Longitude"] != 0)]
+    df = df[(df["Latitude"] > 12.80) & (df["Latitude"] < 13.15)]  # Approximate bounding box for Bengaluru
+    df = df[(df["Longitude"] > 77.40) & (df["Longitude"] < 77.80)]
+    
+    # Parse Temporal features
+    df["datetime"] = pd.to_datetime(df["Date"], format="%d/%m/%Y", errors="coerce")
+    df = df.dropna(subset=["datetime"])
+    
+    df["month"] = df["datetime"].dt.month
+    df["day_of_week"] = df["datetime"].dt.dayofweek
+    
+    # Parse time
+    df["hour"] = pd.to_datetime(df["Time"], format="%H:%M", errors="coerce").dt.hour
+    df["hour"] = df["hour"].fillna(df["Time"].str.split(":").str[0].astype(float).fillna(12).astype(int))
+    df["hour"] = df["hour"].astype(int)
+    
+    # Targets: map to 0-indexed (0=Fatal, 1=Grievous, 2=Minor, 3=Non-Injury)
+    df["target"] = df["Severity"].astype(int) - 1
+    
+    # Categoricals and Numericals
+    num_cols = ["Traffic_Volume"]
+    df["Traffic_Volume"] = pd.to_numeric(df["Traffic_Volume"], errors="coerce")
+    df["Traffic_Volume"] = df["Traffic_Volume"].fillna(df["Traffic_Volume"].median())
+    
+    bool_cols = ["Speed_Breaker", "Traffic_Signal", "Junction", "Crossing"]
+    for col in bool_cols:
+        df[col] = df[col].fillna(0).astype(int)
+        
+    df["Weather_Condition"] = df["Weather_Condition"].fillna("Sunny/Clear")
+    df["Road_Condition"] = df["Road_Condition"].fillna("Dry")
+    
+    # Feature columns list
+    feature_cols = [
+        "month", "day_of_week", "hour", "Traffic_Volume"
+    ] + bool_cols + ["Weather_Condition", "Road_Condition"]
+    
+    X = df[feature_cols].copy()
+    y = df["target"].copy()
+    
+    # Coordinates for KDE
+    coords = df[["Latitude", "Longitude"]].rename(columns={"Latitude": "latitude", "Longitude": "longitude"}).copy()
+    
+    # One-hot encode categoricals
+    categorical_cols = ["Weather_Condition", "Road_Condition"]
+    X = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
+    
+    # Fill remaining NaNs
+    X = X.fillna(X.median(numeric_only=True))
+    
+    # Scale numerical columns
+    scaler = StandardScaler()
+    X[num_cols] = scaler.fit_transform(X[num_cols])
+    
+    # Save scaler and feature columns for prediction service
+    os.makedirs("models", exist_ok=True)
+    joblib.dump(scaler, "models/bengaluru_scaler.joblib")
+    joblib.dump(X.columns.tolist(), "models/bengaluru_features.joblib")
+    
+    print(f"Bengaluru Preprocessing complete. Cleaned shape: {X.shape}, Classes: {np.bincount(y)}")
+    return X, y, coords
+
 def split_and_prep_data(X, y, test_size=0.2, random_state=42):
     """Split data into train and test sets."""
     X_train, X_test, y_train, y_test = train_test_split(
